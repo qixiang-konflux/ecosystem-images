@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/go-toolset:1.20.12-3.1713832665@sha256:4b9c0a15e3be72c8455ee5398069c74bcde6d827a139c2c3b5f2db779c5b1db8 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.21.9-1.1715774364@sha256:f001ad1001a22fe5f6fc7d876fc172b01c1b7dcd6c498f83a07b425e24275a79 AS builder
 
 WORKDIR /app
 COPY . .
