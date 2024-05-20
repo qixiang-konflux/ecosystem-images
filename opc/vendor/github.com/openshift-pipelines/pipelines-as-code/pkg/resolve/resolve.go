@@ -15,17 +15,47 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8scheme "k8s.io/client-go/kubernetes/scheme"
+	yaml "sigs.k8s.io/yaml/goyaml.v2"
 )
 
 type TektonTypes struct {
-	PipelineRuns []*tektonv1.PipelineRun
-	Pipelines    []*tektonv1.Pipeline
-	TaskRuns     []*tektonv1.TaskRun
-	Tasks        []*tektonv1.Task
+	PipelineRuns     []*tektonv1.PipelineRun
+	Pipelines        []*tektonv1.Pipeline
+	TaskRuns         []*tektonv1.TaskRun
+	Tasks            []*tektonv1.Task
+	ValidationErrors map[string]string
+}
+
+func NewTektonTypes() TektonTypes {
+	return TektonTypes{
+		ValidationErrors: map[string]string{},
+	}
 }
 
 var yamlDocSeparatorRe = regexp.MustCompile(`(?m)^---\s*$`)
+
+// detectAtleastNameOrGenerateNameFromPipelineRun detects the name or
+// generateName of a yaml files even if there is an error decoding it as tekton types.
+func detectAtleastNameOrGenerateNameFromPipelineRun(data string) string {
+	var metadataName struct {
+		Metadata metav1.ObjectMeta
+	}
+	err := yaml.Unmarshal([]byte(data), &metadataName)
+	if err != nil {
+		return ""
+	}
+	if metadataName.Metadata.Name != "" {
+		return metadataName.Metadata.Name
+	}
+
+	// TODO: yaml Unmarshal don't want to parse generatename and i have no idea why
+	if metadataName.Metadata.GenerateName != "" {
+		return metadataName.Metadata.GenerateName
+	}
+	return "unknown"
+}
 
 // getTaskRunByName returns the taskrun with the given name the first one found
 // will be matched. It does not handle conflicts so user has fetched multiple
@@ -97,8 +127,15 @@ func inlineTasks(tasks []tektonv1.PipelineTask, ropt *Opts, types TektonTypes) (
 			if err != nil {
 				return nil, err
 			}
+			tmd := tektonv1.PipelineTaskMetadata{
+				Annotations: taskResolved.GetObjectMeta().GetAnnotations(),
+				Labels:      taskResolved.GetObjectMeta().GetLabels(),
+			}
 			task.TaskRef = nil
-			task.TaskSpec = &tektonv1.EmbeddedTask{TaskSpec: taskResolved.Spec}
+			task.TaskSpec = &tektonv1.EmbeddedTask{
+				TaskSpec: taskResolved.Spec,
+				Metadata: tmd,
+			}
 		}
 		pipelineTasks = append(pipelineTasks, task)
 	}
@@ -113,7 +150,7 @@ type Opts struct {
 }
 
 func ReadTektonTypes(ctx context.Context, log *zap.SugaredLogger, data string) (TektonTypes, error) {
-	types := TektonTypes{}
+	types := NewTektonTypes()
 	decoder := k8scheme.Codecs.UniversalDeserializer()
 
 	for _, doc := range yamlDocSeparatorRe.Split(data, -1) {
@@ -123,7 +160,7 @@ func ReadTektonTypes(ctx context.Context, log *zap.SugaredLogger, data string) (
 
 		obj, _, err := decoder.Decode([]byte(doc), nil, nil)
 		if err != nil {
-			log.Infof("Skipping document not looking like a kubernetes resources: %v", err)
+			types.ValidationErrors[detectAtleastNameOrGenerateNameFromPipelineRun(doc)] = err.Error()
 			continue
 		}
 		switch o := obj.(type) {
@@ -152,7 +189,7 @@ func ReadTektonTypes(ctx context.Context, log *zap.SugaredLogger, data string) (
 		case *tektonv1.Task:
 			types.Tasks = append(types.Tasks, o)
 		default:
-			log.Info("Skipping document not looking like a tekton resource we can Resolve.")
+			log.Info("skipping yaml document not looking like a tekton resource we can Resolve.")
 		}
 	}
 

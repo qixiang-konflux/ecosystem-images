@@ -8,11 +8,12 @@ import (
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/google/go-github/v56/github"
+	"github.com/google/go-github/v61/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
 	"golang.org/x/oauth2"
 )
@@ -133,14 +134,14 @@ func (gh *gitHubConfig) create(ctx context.Context) error {
 		Active: github.Bool(true),
 		Events: []string{
 			"issue_comment",
-			"pull_request",
+			triggertype.PullRequest.String(),
 			"push",
 		},
-		Config: map[string]interface{}{
-			"url":          gh.controllerURL,
-			"content_type": "json",
-			"insecure_ssl": "0",
-			"secret":       gh.webhookSecret,
+		Config: &github.HookConfig{
+			URL:         github.String(gh.controllerURL),
+			ContentType: github.String("json"),
+			InsecureSSL: github.String("0"),
+			Secret:      github.String(gh.webhookSecret),
 		},
 	}
 

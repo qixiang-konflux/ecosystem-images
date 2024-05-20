@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/go-github/v56/github"
+	"github.com/google/go-github/v61/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/policy"
@@ -46,8 +46,8 @@ func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, a
 	return false, fmt.Sprintf("user: %s is not a member of any of the allowed teams: %v", event.Sender, allowedTeams)
 }
 
-// IsAllowedOwnersFile gets the owner file from main branch and check if we have
-// explicitly allowed the user in there.
+// IsAllowedOwnersFile get the owner files (OWNERS, OWNERS_ALIASES) from main branch
+// and check if we have explicitly allowed the user in there.
 func (v *Provider) IsAllowedOwnersFile(ctx context.Context, event *info.Event) (bool, error) {
 	ownerContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS", event)
 	if err != nil {
@@ -57,8 +57,15 @@ func (v *Provider) IsAllowedOwnersFile(ctx context.Context, event *info.Event) (
 		}
 		return false, err
 	}
+	// If there is OWNERS file, check for OWNERS_ALIASES
+	ownerAliasesContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS_ALIASES", event)
+	if err != nil {
+		if !strings.Contains(err.Error(), "cannot find") {
+			return false, err
+		}
+	}
 
-	return acl.UserInOwnerFile(ownerContent, event.Sender)
+	return acl.UserInOwnerFile(ownerContent, ownerAliasesContent, event.Sender)
 }
 
 func (v *Provider) IsAllowed(ctx context.Context, event *info.Event) (bool, error) {
@@ -126,14 +133,14 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 	case *github.IssueCommentEvent:
 		// if we don't need to check old comments, then on issue comment we
 		// need to check if comment have /ok-to-test and is from allowed user
-		if !v.Run.Info.Pac.RememberOKToTest {
+		if !v.pacInfo.RememberOKToTest {
 			return v.aclAllowedOkToTestCurrentComment(ctx, revent, event.Comment.GetID())
 		}
 		revent.URL = event.Issue.GetPullRequestLinks().GetHTMLURL()
 	case *github.PullRequestEvent:
 		// if we don't need to check old comments, then on push event we don't need
 		// to check anything for the non-allowed user
-		if !v.Run.Info.Pac.RememberOKToTest {
+		if !v.pacInfo.RememberOKToTest {
 			return false, nil
 		}
 		revent.URL = event.GetPullRequest().GetHTMLURL()
